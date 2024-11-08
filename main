@@ -1,0 +1,221 @@
+"""
+This file converts an equation from infix notation to postfix notation
+Infix: 1+2*3
+Postfix: 123*+
+"""
+
+import operator
+from dataclasses import dataclass
+
+
+class TooManyItemsError(Exception):
+    """Raises if the final list doesn't contain exactly one item"""
+
+    pass
+
+
+class TooManyDecimalsError(Exception):
+    """Raises if more than one decimal in a row"""
+
+    pass
+
+
+@dataclass
+class Current:
+    """
+    Stores whole equation, index and character currently being interpreted
+    """
+
+    equation = None
+    current_index = -1
+    current_char = None
+
+
+def next_index() -> None:
+    """Move to next index in string. Update current_character."""
+    Current.current_index += 1
+    Current.current_char = (
+        Current.equation[Current.current_index]
+        if Current.current_index < len(Current.equation)
+        else None
+    )
+
+
+def peek() -> str:
+    """Return next char in string."""
+    return (
+        Current.equation[Current.current_index + 1]
+        if Current.current_index + 1 < len(Current.equation)
+        else None
+    )
+
+
+def precedence(op: str) -> int:
+    """
+    Assign value to operand to maintain correct stack order.
+    Higher number = greater precedence
+    """
+
+    match op:
+        case "^":
+            return 3
+        case "*":
+            return 2
+        case "/":
+            return 2
+        case "+":
+            return 1
+        case "-":
+            return 1
+        # all else
+        case _:
+            return -1
+
+
+def evaluate(number1: int | float, op: str, number2: int | float) -> int | float:
+    """Evaluate the expression"""
+
+    result = None
+    match op:
+        case "^":
+            result = operator.pow(number1, number2)
+        case "*":
+            result = operator.mul(number1, number2)
+        case "/":
+            result = operator.truediv(number1, number2)
+        case "+":
+            result = operator.add(number1, number2)
+        case "-":
+            result = operator.sub(number1, number2)
+    return result
+
+
+def make_number_(is_negative: bool = False) -> str:
+    """Ensures numbers are formed correctly"""
+
+    decimal_count = 0
+
+    num_str = "-" if is_negative else ""
+    num_str += Current.current_char
+
+    while peek() and peek().isdecimal() or peek() == ".":
+        if peek() == "." and decimal_count:
+            raise TooManyDecimalsError
+        else:
+            decimal_count += 1
+        next_index()
+        num_str += Current.current_char
+    return num_str
+
+
+def make_number(is_negative: bool = False) -> str:
+    """Ensures numbers are formed correctly"""
+
+    decimal_count = 1 if Current.current_char == "." else 0
+
+    num_str = Current.current_char
+
+    while peek() and peek().isdecimal() or peek() == ".":
+        next_index()
+        # Prevents decimal overload
+        if Current.current_char == ".":
+            if decimal_count:
+                raise TooManyDecimalsError
+            else:
+                decimal_count += 1
+                num_str += Current.current_char
+        else:
+            num_str += Current.current_char
+
+    # remove leading 0s
+    num_str = num_str.lstrip("0") or "0"
+
+    # no trailing decimal
+    if num_str.endswith("."):
+        num_str += "0"
+
+    return num_str
+
+
+def convert_to_postfix() -> list[str]:
+    """
+    Converts infix expression to postfix.
+    """
+    result = []
+    stack = []
+    next_index()
+
+    while Current.current_index < len(Current.equation):
+        curr_char = Current.current_char
+
+        # Handle negative numbers
+        if curr_char == "-" and (
+            Current.current_index == 0
+            or Current.equation[Current.current_index - 1] in "(-+*/^"
+        ):
+            result.append(make_number(True))  # Treat as a negative number
+        elif curr_char.isdecimal() or curr_char == ".":
+            result.append(make_number(False))
+        elif curr_char == "(":
+            stack.append(curr_char)
+        elif curr_char == ")":
+            # empty stack into result until ( is found
+            while stack and stack[-1] != "(":
+                result.append(stack.pop())
+            if not stack:
+                raise IndexError("Unbalanced parentheses: No matching '(' for ')'")
+            stack.pop()  # Pop the '(' from the stack
+        else:
+            # Ensure curr_char is a valid operator before proceeding
+            if curr_char not in {"+", "-", "*", "/", "^"}:
+                raise ValueError(f"Invalid character in equation: {curr_char}")
+
+            # Manage operator precedence
+            while stack and (precedence(curr_char) < precedence(stack[-1])):
+                result.append(stack.pop())
+            stack.append(curr_char)
+        next_index()
+
+    # empty contents of stack into result
+    while stack:
+        top = stack.pop()
+        if top == "(":
+            raise IndexError("Unbalanced parentheses: No matching ')' for '('")
+        result.append(top)
+
+    return result
+
+
+def solve(equation: str) -> int | float:
+    """Solve the equation"""
+    Current.equation = equation
+    # Reset to start
+    Current.current_index = -1
+    stack = []
+
+    for item in convert_to_postfix():
+        try:
+            # check if item is valid float
+            num = float(item)
+            stack.append(num)
+        except ValueError:
+            # if item is not number, treat as operator
+            if len(stack) < 2:
+                raise ValueError("Insufficient values in expression for operation")
+            val1 = stack.pop()
+            val2 = stack.pop()
+            result = evaluate(val2, item, val1)
+            stack.append(result)
+
+    # one item in stack = that's the answer
+    if len(stack) == 1:
+        final_result = stack[0]
+        return int(final_result) if final_result.is_integer() else final_result
+    else:
+        raise TooManyItemsError(f"Result should only have 1 item, not {len(stack)}")
+
+
+# print(solve("2+(3*1)-10"))  # -5
+# print(solve("(100+200)/2*5+7"))  # 757
+# print(solve("(3.5+2)*(4-7)/2+8^2-5.5"))  # 50.25
+# print(solve("1+2*3"))  # 7
